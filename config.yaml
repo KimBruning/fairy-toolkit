@@ -1,0 +1,6 @@
+# Fairy Toolkit Configuration
+#
+# Point this at your content directory (stories, worldbuilding, etc.)
+# Path is relative to this config file's location.
+
+content_root: ../fairy_project
