@@ -6,7 +6,7 @@ Semantic search and indexing tools for creative writing projects. Find stories, 
 
 ```bash
 # Clone the toolkit
-git clone https://github.com/yourname/fairy-toolkit.git
+git clone https://github.com/KimBruning/fairy-toolkit.git
 cd fairy-toolkit
 
 # Set up a new project (creates sibling directory + parent CLAUDE.md)
