@@ -2,6 +2,8 @@
 
 Semantic search and indexing tools for creative writing projects. Find stories, worldbuilding docs, and notes by meaning rather than keywords.
 
+**Built for NixOS** - uses nix-shell shebangs for automatic dependency management. No virtualenv needed.
+
 ## Installation
 
 ```bash
@@ -70,12 +72,12 @@ Content is auto-tagged by directory (`stories/` → type:story, etc.)
 
 ## Dependencies
 
-Uses nix-shell for automatic dependency management:
+**NixOS / Nix:** Dependencies are handled automatically via nix-shell shebangs in each script. Just run the scripts directly - nix will fetch:
 - chromadb
 - sentence-transformers
 - pyyaml
 
-Or install manually:
+**Other systems:** Install manually:
 ```bash
 pip install chromadb sentence-transformers pyyaml
 ```
@@ -97,3 +99,4 @@ Override with `--root`:
 
 - `CLAUDE.md` - Full usage reference (also symlinked to parent)
 - `docs/vector_search.md` - Architecture and implementation details
+- `docs/worldbuilding-workflow.md` - Extracting characters/locations from stories

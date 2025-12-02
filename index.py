@@ -157,14 +157,14 @@ def file_hash(filepath: Path) -> str:
     return f"{stat.st_mtime}:{stat.st_size}"
 
 
-def load_manifest(manifest_path: Path = MANIFEST_PATH) -> dict:
+def load_manifest(manifest_path: Path) -> dict:
     """Load the index manifest tracking indexed files."""
     if manifest_path.exists():
         return json.loads(manifest_path.read_text())
     return {"files": {}, "version": 1}
 
 
-def save_manifest(manifest: dict, manifest_path: Path = MANIFEST_PATH):
+def save_manifest(manifest: dict, manifest_path: Path):
     """Save the index manifest."""
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2))
@@ -292,10 +292,10 @@ def remove_file_chunks(rel_path: str, collection, manifest: dict):
 
 
 def index_incremental(
-    root: Path = PROJECT_ROOT,
-    db_path: Path = DB_PATH,
-    manifest_path: Path = MANIFEST_PATH,
-    collection_name: str = "fairy_project",
+    root: Path,
+    db_path: Path,
+    manifest_path: Path,
+    collection_name: str,
     verbose: bool = True,
     batch_size: int = 500
 ):
@@ -362,10 +362,10 @@ def index_incremental(
 
 
 def index_rebuild(
-    root: Path = PROJECT_ROOT,
-    db_path: Path = DB_PATH,
-    manifest_path: Path = MANIFEST_PATH,
-    collection_name: str = "fairy_project",
+    root: Path,
+    db_path: Path,
+    manifest_path: Path,
+    collection_name: str,
     verbose: bool = True,
     batch_size: int = 500
 ):
@@ -410,10 +410,10 @@ def index_rebuild(
 
 def index_add(
     paths: list[str],
-    root: Path = PROJECT_ROOT,
-    db_path: Path = DB_PATH,
-    manifest_path: Path = MANIFEST_PATH,
-    collection_name: str = "fairy_project",
+    root: Path,
+    db_path: Path,
+    manifest_path: Path,
+    collection_name: str,
     verbose: bool = True,
     batch_size: int = 500
 ):
@@ -470,7 +470,7 @@ def index_add(
         print(f"Added {chunk_count} chunks from {len(files_to_add)} files.")
 
 
-def show_status(manifest_path: Path = MANIFEST_PATH, db_path: Path = DB_PATH):
+def show_status(manifest_path: Path, db_path: Path):
     """Show index status."""
     manifest = load_manifest(manifest_path)
     files = manifest.get("files", {})

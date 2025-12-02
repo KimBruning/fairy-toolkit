@@ -1,5 +1,7 @@
 # Creative Writing Toolkit
 
+**Built for NixOS** - scripts use nix-shell shebangs for automatic dependency management.
+
 **IMPORTANT: Run Claude Code from the PARENT directory, not from inside fairy-toolkit/ or your content directory!**
 
 ```bash
