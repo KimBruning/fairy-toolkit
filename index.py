@@ -14,9 +14,16 @@ import json
 from pathlib import Path
 from typing import Generator
 
+import os
+os.environ["ANONYMIZED_TELEMETRY"] = "False"  # Disable ChromaDB telemetry (belt)
+
 import yaml
 import chromadb
+from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
+
+# Suspenders
+CHROMA_SETTINGS = Settings(anonymized_telemetry=False)
 
 TOOLKIT_DIR = Path(__file__).parent.resolve()
 CONFIG_PATH = TOOLKIT_DIR / "config.yaml"
@@ -303,7 +310,7 @@ def index_incremental(
         print(f"Setting up ChromaDB at {db_path}...")
     db_path.mkdir(parents=True, exist_ok=True)
 
-    client = chromadb.PersistentClient(path=str(db_path))
+    client = chromadb.PersistentClient(path=str(db_path), settings=CHROMA_SETTINGS)
     manifest = load_manifest(manifest_path)
 
     # Get or create collection
@@ -373,7 +380,7 @@ def index_rebuild(
         print(f"Setting up ChromaDB at {db_path}...")
     db_path.mkdir(parents=True, exist_ok=True)
 
-    client = chromadb.PersistentClient(path=str(db_path))
+    client = chromadb.PersistentClient(path=str(db_path), settings=CHROMA_SETTINGS)
 
     # Delete existing collection
     try:
@@ -418,7 +425,7 @@ def index_add(
     model = SentenceTransformer('all-MiniLM-L6-v2')
 
     db_path.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(db_path))
+    client = chromadb.PersistentClient(path=str(db_path), settings=CHROMA_SETTINGS)
     manifest = load_manifest(manifest_path)
 
     try:

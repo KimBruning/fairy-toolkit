@@ -10,9 +10,16 @@ Semantic search across indexed creative writing content.
 import argparse
 from pathlib import Path
 
+import os
+os.environ["ANONYMIZED_TELEMETRY"] = "False"  # Disable ChromaDB telemetry (belt)
+
 import yaml
 import chromadb
+from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
+
+# Suspenders
+CHROMA_SETTINGS = Settings(anonymized_telemetry=False)
 
 TOOLKIT_DIR = Path(__file__).parent.resolve()
 CONFIG_PATH = TOOLKIT_DIR / "config.yaml"
@@ -61,7 +68,7 @@ def search(
 ):
     """Search the vector database."""
     model = SentenceTransformer('all-MiniLM-L6-v2')
-    client = chromadb.PersistentClient(path=str(_db_path))
+    client = chromadb.PersistentClient(path=str(_db_path), settings=CHROMA_SETTINGS)
 
     try:
         collection = client.get_collection(_collection_name)
