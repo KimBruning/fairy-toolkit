@@ -1,10 +1,10 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i python3 -p python312 python312Packages.chromadb python312Packages.sentence-transformers python312Packages.pyyaml
+#!nix-shell -i python3 -p python312 python312Packages.lancedb python312Packages.sentence-transformers python312Packages.pyyaml python312Packages.pyarrow python312Packages.pandas
 
 """
 Creative Writing Vector DB Indexer
 
-Indexes content into ChromaDB for semantic search.
+Indexes content into LanceDB for semantic search.
 Supports incremental updates - only indexes new/modified files.
 """
 
@@ -14,16 +14,10 @@ import json
 from pathlib import Path
 from typing import Generator
 
-import os
-os.environ["ANONYMIZED_TELEMETRY"] = "False"  # Disable ChromaDB telemetry (belt)
-
 import yaml
-import chromadb
-from chromadb.config import Settings
+import lancedb
+import pyarrow as pa
 from sentence_transformers import SentenceTransformer
-
-# Suspenders
-CHROMA_SETTINGS = Settings(anonymized_telemetry=False)
 
 TOOLKIT_DIR = Path(__file__).parent.resolve()
 CONFIG_PATH = TOOLKIT_DIR / "config.yaml"
@@ -44,7 +38,7 @@ def get_default_content_root():
     return (TOOLKIT_DIR / content_root).resolve()
 
 
-# Known characters for auto-tagging (customize in config.yaml)
+# Known characters for auto-tagging
 CHARACTERS = [
     "Gwyneth", "Caoimhe", "Caiomhe", "Eirwen", "Rhia", "Eilis", "Brigid",
     "Underhill", "Sylvarum", "Marion", "Selenis"
@@ -89,17 +83,13 @@ def get_folders(filepath: Path, root: Path) -> list[str]:
     except ValueError:
         parts = filepath.parts
 
-    # All folders (everything except the filename)
     if len(parts) > 1:
         return list(parts[:-1])
     return []
 
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> Generator[tuple[str, int], None, None]:
-    """
-    Split text into overlapping chunks.
-    Yields (chunk_text, chunk_index).
-    """
+    """Split text into overlapping chunks."""
     if len(text) <= chunk_size:
         yield text, 0
         return
@@ -110,7 +100,6 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> Generat
         end = start + chunk_size
         chunk = text[start:end]
 
-        # Try to break at paragraph or sentence boundary
         if end < len(text):
             para_break = chunk.rfind('\n\n')
             if para_break > chunk_size // 2:
@@ -163,7 +152,7 @@ def load_manifest(manifest_path: Path) -> dict:
     """Load the index manifest tracking indexed files."""
     if manifest_path.exists():
         return json.loads(manifest_path.read_text())
-    return {"files": {}, "version": 1}
+    return {"files": {}, "version": 2}
 
 
 def save_manifest(manifest: dict, manifest_path: Path):
@@ -173,10 +162,7 @@ def save_manifest(manifest: dict, manifest_path: Path):
 
 
 def get_files_to_index(root: Path, manifest: dict, force: bool = False) -> tuple[list[Path], list[Path], list[str]]:
-    """
-    Determine which files need indexing.
-    Returns: (new_files, modified_files, deleted_file_keys)
-    """
+    """Determine which files need indexing."""
     current_files = {}
     for filepath, _ in collect_documents(root):
         try:
@@ -191,14 +177,12 @@ def get_files_to_index(root: Path, manifest: dict, force: bool = False) -> tuple
     modified_files = []
     deleted_keys = []
 
-    # Find new and modified files
     for rel_path, (filepath, fhash) in current_files.items():
         if rel_path not in indexed:
             new_files.append(filepath)
         elif indexed[rel_path]["hash"] != fhash or force:
             modified_files.append(filepath)
 
-    # Find deleted files
     for rel_path in indexed:
         if rel_path not in current_files:
             deleted_keys.append(rel_path)
@@ -206,20 +190,15 @@ def get_files_to_index(root: Path, manifest: dict, force: bool = False) -> tuple
     return new_files, modified_files, deleted_keys
 
 
-def index_files(
+def prepare_documents(
     files: list[Path],
-    collection,
     model: SentenceTransformer,
     manifest: dict,
     root: Path,
-    verbose: bool = True,
-    batch_size: int = 500
-):
-    """Index a list of files into the collection."""
-    if not files:
-        return 0
-
-    docs_to_index = []
+    verbose: bool = True
+) -> list[dict]:
+    """Prepare documents with embeddings for indexing."""
+    docs = []
 
     for filepath in files:
         try:
@@ -242,64 +221,86 @@ def index_files(
             topics = extract_topics(chunk)
             chunk_ids.append(doc_id)
 
-            docs_to_index.append({
+            docs.append({
                 "id": doc_id,
                 "text": chunk,
-                "metadata": {
-                    "filename": rel_path,
-                    "folders": ",".join(folders) if folders else "",
-                    "characters": ",".join(characters) if characters else "",
-                    "topics": ",".join(topics) if topics else "",
-                    "chunk_idx": chunk_idx,
-                }
+                "filename": rel_path,
+                "folders": ",".join(folders) if folders else "",
+                "characters": ",".join(characters) if characters else "",
+                "topics": ",".join(topics) if topics else "",
+                "chunk_idx": chunk_idx,
             })
 
-        # Update manifest
         manifest["files"][rel_path] = {
             "hash": file_hash(filepath),
             "chunk_ids": chunk_ids,
         }
 
-    if not docs_to_index:
-        return 0
-
-    # Batch embed and add
-    for i in range(0, len(docs_to_index), batch_size):
-        batch = docs_to_index[i:i + batch_size]
-        texts = [d["text"] for d in batch]
-        embeddings = model.encode(texts).tolist()
-
-        collection.add(
-            ids=[d["id"] for d in batch],
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=[d["metadata"] for d in batch],
-        )
+    # Batch embed all texts
+    if docs:
         if verbose:
-            print(f"  Indexed {min(i + batch_size, len(docs_to_index))}/{len(docs_to_index)} chunks")
+            print(f"  Embedding {len(docs)} chunks...")
+        texts = [d["text"] for d in docs]
+        embeddings = model.encode(texts, show_progress_bar=verbose)
+        for doc, emb in zip(docs, embeddings):
+            doc["vector"] = emb.tolist()
 
-    return len(docs_to_index)
+    return docs
 
 
-def remove_file_chunks(rel_path: str, collection, manifest: dict):
-    """Remove all chunks for a file from the collection."""
-    file_info = manifest["files"].get(rel_path)
-    if file_info and file_info.get("chunk_ids"):
-        try:
-            collection.delete(ids=file_info["chunk_ids"])
-        except Exception:
-            pass  # Chunks might not exist
-    if rel_path in manifest["files"]:
-        del manifest["files"][rel_path]
+def index_rebuild(
+    root: Path,
+    db_path: Path,
+    manifest_path: Path,
+    table_name: str,
+    verbose: bool = True,
+):
+    """Full rebuild - delete and recreate index."""
+    if verbose:
+        print("Initializing embedding model...")
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+
+    if verbose:
+        print(f"Setting up LanceDB at {db_path}...")
+    db_path.mkdir(parents=True, exist_ok=True)
+
+    db = lancedb.connect(str(db_path))
+
+    # Drop existing table if it exists
+    try:
+        db.drop_table(table_name)
+    except Exception:
+        pass
+
+    # Fresh manifest
+    manifest = {"files": {}, "version": 2}
+
+    # Collect all files
+    all_files = [fp for fp, _ in collect_documents(root)]
+
+    if verbose:
+        print(f"Indexing {len(all_files)} files...")
+
+    docs = prepare_documents(all_files, model, manifest, root, verbose)
+
+    if docs:
+        if verbose:
+            print(f"  Writing {len(docs)} chunks to database...")
+        db.create_table(table_name, docs)
+
+    save_manifest(manifest, manifest_path)
+
+    if verbose:
+        print(f"\nDone! Indexed {len(docs)} chunks from {len(all_files)} files.")
+        print(f"Database stored at: {db_path}")
 
 
 def index_incremental(
     root: Path,
     db_path: Path,
     manifest_path: Path,
-    collection_name: str,
+    table_name: str,
     verbose: bool = True,
-    batch_size: int = 500
 ):
     """Incremental index - only process new/modified files."""
     if verbose:
@@ -307,22 +308,19 @@ def index_incremental(
     model = SentenceTransformer('all-MiniLM-L6-v2')
 
     if verbose:
-        print(f"Setting up ChromaDB at {db_path}...")
+        print(f"Setting up LanceDB at {db_path}...")
     db_path.mkdir(parents=True, exist_ok=True)
 
-    client = chromadb.PersistentClient(path=str(db_path), settings=CHROMA_SETTINGS)
+    db = lancedb.connect(str(db_path))
     manifest = load_manifest(manifest_path)
 
-    # Get or create collection
+    # Check if table exists
     try:
-        collection = client.get_collection(collection_name)
+        table = db.open_table(table_name)
+        table_exists = True
     except Exception:
-        collection = client.create_collection(
-            name=collection_name,
-            metadata={"description": f"Indexed content from {root.name}"}
-        )
+        table_exists = False
 
-    # Find what needs indexing
     new_files, modified_files, deleted_keys = get_files_to_index(root, manifest)
 
     if not new_files and not modified_files and not deleted_keys:
@@ -338,76 +336,51 @@ def index_incremental(
         if deleted_keys:
             print(f"Deleted files: {len(deleted_keys)}")
 
-    # Handle deletions and modifications (remove old chunks)
-    for rel_path in deleted_keys:
-        remove_file_chunks(rel_path, collection, manifest)
+    # Handle deletions and modifications
+    if table_exists and (deleted_keys or modified_files):
+        ids_to_delete = []
+        for rel_path in deleted_keys:
+            file_info = manifest["files"].get(rel_path)
+            if file_info and file_info.get("chunk_ids"):
+                ids_to_delete.extend(file_info["chunk_ids"])
+            if rel_path in manifest["files"]:
+                del manifest["files"][rel_path]
 
-    for filepath in modified_files:
-        try:
-            rel_path = str(filepath.relative_to(root))
-        except ValueError:
-            rel_path = str(filepath)
-        remove_file_chunks(rel_path, collection, manifest)
+        for filepath in modified_files:
+            try:
+                rel_path = str(filepath.relative_to(root))
+            except ValueError:
+                rel_path = str(filepath)
+            file_info = manifest["files"].get(rel_path)
+            if file_info and file_info.get("chunk_ids"):
+                ids_to_delete.extend(file_info["chunk_ids"])
+            if rel_path in manifest["files"]:
+                del manifest["files"][rel_path]
+
+        if ids_to_delete:
+            # Delete by ID using SQL-style filter
+            id_list = ", ".join(f"'{id}'" for id in ids_to_delete)
+            table.delete(f"id IN ({id_list})")
 
     # Index new and modified files
     all_files = new_files + modified_files
     if all_files:
         if verbose:
             print(f"Indexing {len(all_files)} files...")
-        chunk_count = index_files(all_files, collection, model, manifest, root, verbose, batch_size)
-        if verbose:
-            print(f"Indexed {chunk_count} chunks from {len(all_files)} files.")
+        docs = prepare_documents(all_files, model, manifest, root, verbose)
+
+        if docs:
+            if table_exists:
+                table.add(docs)
+            else:
+                db.create_table(table_name, docs)
+
+            if verbose:
+                print(f"Indexed {len(docs)} chunks from {len(all_files)} files.")
 
     save_manifest(manifest, manifest_path)
     if verbose:
         print("Manifest saved.")
-
-
-def index_rebuild(
-    root: Path,
-    db_path: Path,
-    manifest_path: Path,
-    collection_name: str,
-    verbose: bool = True,
-    batch_size: int = 500
-):
-    """Full rebuild - delete and recreate index."""
-    if verbose:
-        print("Initializing embedding model...")
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-
-    if verbose:
-        print(f"Setting up ChromaDB at {db_path}...")
-    db_path.mkdir(parents=True, exist_ok=True)
-
-    client = chromadb.PersistentClient(path=str(db_path), settings=CHROMA_SETTINGS)
-
-    # Delete existing collection
-    try:
-        client.delete_collection(collection_name)
-    except Exception:
-        pass
-
-    collection = client.create_collection(
-        name=collection_name,
-        metadata={"description": f"Indexed content from {root.name}"}
-    )
-
-    # Fresh manifest
-    manifest = {"files": {}, "version": 1}
-
-    # Collect all files
-    all_files = [fp for fp, _ in collect_documents(root)]
-
-    if verbose:
-        print(f"Indexing {len(all_files)} files...")
-
-    chunk_count = index_files(all_files, collection, model, manifest, root, verbose, batch_size)
-    save_manifest(manifest, manifest_path)
-
-    if verbose:
-        print(f"\nDone! Indexed {chunk_count} chunks from {len(all_files)} files.")
-        print(f"Database stored at: {db_path}")
 
 
 def index_add(
@@ -415,9 +388,8 @@ def index_add(
     root: Path,
     db_path: Path,
     manifest_path: Path,
-    collection_name: str,
+    table_name: str,
     verbose: bool = True,
-    batch_size: int = 500
 ):
     """Add specific files or directories to the index."""
     if verbose:
@@ -425,16 +397,14 @@ def index_add(
     model = SentenceTransformer('all-MiniLM-L6-v2')
 
     db_path.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(db_path), settings=CHROMA_SETTINGS)
+    db = lancedb.connect(str(db_path))
     manifest = load_manifest(manifest_path)
 
     try:
-        collection = client.get_collection(collection_name)
+        table = db.open_table(table_name)
+        table_exists = True
     except Exception:
-        collection = client.create_collection(
-            name=collection_name,
-            metadata={"description": f"Indexed content from {root.name}"}
-        )
+        table_exists = False
 
     files_to_add = []
     for p in paths:
@@ -453,23 +423,39 @@ def index_add(
         print("No files to add.")
         return
 
-    # Remove existing chunks for these files (in case of update)
-    for filepath in files_to_add:
-        try:
-            rel_path = str(filepath.relative_to(root))
-        except ValueError:
-            rel_path = str(filepath)
-        if rel_path in manifest["files"]:
-            remove_file_chunks(rel_path, collection, manifest)
+    # Remove existing chunks for these files
+    if table_exists:
+        ids_to_delete = []
+        for filepath in files_to_add:
+            try:
+                rel_path = str(filepath.relative_to(root))
+            except ValueError:
+                rel_path = str(filepath)
+            file_info = manifest["files"].get(rel_path)
+            if file_info and file_info.get("chunk_ids"):
+                ids_to_delete.extend(file_info["chunk_ids"])
+            if rel_path in manifest["files"]:
+                del manifest["files"][rel_path]
+
+        if ids_to_delete:
+            id_list = ", ".join(f"'{id}'" for id in ids_to_delete)
+            table.delete(f"id IN ({id_list})")
 
     if verbose:
         print(f"Adding {len(files_to_add)} files...")
 
-    chunk_count = index_files(files_to_add, collection, model, manifest, root, verbose, batch_size)
+    docs = prepare_documents(files_to_add, model, manifest, root, verbose)
+
+    if docs:
+        if table_exists:
+            table.add(docs)
+        else:
+            db.create_table(table_name, docs)
+
     save_manifest(manifest, manifest_path)
 
     if verbose:
-        print(f"Added {chunk_count} chunks from {len(files_to_add)} files.")
+        print(f"Added {len(docs)} chunks from {len(files_to_add)} files.")
 
 
 def show_status(manifest_path: Path, db_path: Path):
@@ -497,15 +483,15 @@ def get_paths(root: Path | None, collection: str | None) -> tuple[Path, Path, Pa
     else:
         root_path = get_default_content_root()
 
-    coll_name = collection or root_path.name
+    table_name = collection or root_path.name
     db_path = root_path / "vector_db"
     manifest_path = db_path / "manifest.json"
-    return root_path, db_path, manifest_path, coll_name
+    return root_path, db_path, manifest_path, table_name
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Index content into ChromaDB for semantic search"
+        description="Index content into LanceDB for semantic search"
     )
     parser.add_argument(
         "--root", metavar="DIR",
@@ -513,7 +499,7 @@ def main():
     )
     parser.add_argument(
         "--collection", metavar="NAME",
-        help="Collection name (default: directory name)"
+        help="Table name (default: directory name)"
     )
     parser.add_argument(
         "--rebuild", action="store_true",
@@ -535,14 +521,10 @@ def main():
         "-q", "--quiet", action="store_true",
         help="Suppress progress output"
     )
-    parser.add_argument(
-        "--batch-size", type=int, default=500, metavar="N",
-        help="Batch size for DB writes (default: 500, larger = fewer fsyncs)"
-    )
     args = parser.parse_args()
 
     verbose = not args.quiet
-    root_path, db_path, manifest_path, coll_name = get_paths(args.root, args.collection)
+    root_path, db_path, manifest_path, table_name = get_paths(args.root, args.collection)
 
     if args.status:
         show_status(manifest_path, db_path)
@@ -550,7 +532,7 @@ def main():
         manifest = load_manifest(manifest_path)
         new_files, modified_files, deleted_keys = get_files_to_index(root_path, manifest)
         print(f"Root: {root_path}")
-        print(f"Collection: {coll_name}")
+        print(f"Table: {table_name}")
         print(f"\nNew files ({len(new_files)}):")
         for f in new_files:
             try:
@@ -570,14 +552,13 @@ def main():
             print("\nIndex is up to date.")
     elif args.add:
         index_add(args.add, root=root_path, db_path=db_path, manifest_path=manifest_path,
-                  collection_name=coll_name, verbose=verbose, batch_size=args.batch_size)
+                  table_name=table_name, verbose=verbose)
     elif args.rebuild:
         index_rebuild(root=root_path, db_path=db_path, manifest_path=manifest_path,
-                      collection_name=coll_name, verbose=verbose, batch_size=args.batch_size)
+                      table_name=table_name, verbose=verbose)
     else:
-        # Default: incremental update
         index_incremental(root=root_path, db_path=db_path, manifest_path=manifest_path,
-                          collection_name=coll_name, verbose=verbose, batch_size=args.batch_size)
+                          table_name=table_name, verbose=verbose)
 
 
 if __name__ == "__main__":
