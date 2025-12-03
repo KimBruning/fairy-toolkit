@@ -86,6 +86,8 @@ def get_source_type(filepath: Path, root: Path) -> str:
         return "worldbuilding"
     elif "stories" in parts:
         return "story"
+    elif "non-canon" in parts:
+        return "non-canon"
     elif "documents" in parts:
         return "document"
     elif "notes" in parts:
