@@ -55,7 +55,7 @@ def configure(root: Path | None = None, collection: str | None = None):
 def search(
     query: str,
     n_results: int = 5,
-    source_type: str | None = None,
+    folder: str | None = None,
     character: str | None = None,
     topic: str | None = None,
 ):
@@ -69,29 +69,28 @@ def search(
         print(f"Error: No indexed data found at {_db_path}. Run index.py first.")
         return
 
-    # Build where filter (only source_type uses ChromaDB filter)
-    where = {"source_type": source_type} if source_type else None
-
     # Embed query and search
-    # Fetch extra results if we need to post-filter by character/topic
-    fetch_n = n_results * 5 if (character or topic) else n_results
+    # Fetch extra results if we need to post-filter
+    needs_filter = folder or character or topic
+    fetch_n = n_results * 5 if needs_filter else n_results
     query_embedding = model.encode([query]).tolist()
 
     results = collection.query(
         query_embeddings=query_embedding,
         n_results=fetch_n,
-        where=where,
         include=["documents", "metadatas", "distances"],
     )
 
-    # Post-filter for character/topic (ChromaDB doesn't support substring match)
-    if character or topic:
+    # Post-filter for folder/character/topic (substring match on comma-separated fields)
+    if needs_filter:
         filtered = {"documents": [[]], "metadatas": [[]], "distances": [[]]}
         for doc, meta, dist in zip(
             results["documents"][0],
             results["metadatas"][0],
             results["distances"][0],
         ):
+            if folder and folder.lower() not in meta.get("folders", "").lower():
+                continue
             if character and character.lower() not in meta.get("characters", "").lower():
                 continue
             if topic and topic.lower() not in meta.get("topics", "").lower():
@@ -110,8 +109,8 @@ def search(
 
     print(f"\n{'='*60}")
     print(f"Search: \"{query}\"")
-    if source_type:
-        print(f"Filter: source_type={source_type}")
+    if folder:
+        print(f"Filter: folder={folder}")
     if character:
         print(f"Filter: character={character}")
     if topic:
@@ -124,8 +123,10 @@ def search(
         results["distances"][0],
     )):
         score = 1 - dist  # Convert distance to similarity
+        folders = meta.get('folders', '')
+        folder_display = folders if folders else "root"
         print(f"[{i+1}] {meta['filename']} (chunk {meta['chunk_idx']})")
-        print(f"    Type: {meta['source_type']} | Score: {score:.3f}")
+        print(f"    Type: {folder_display} | Score: {score:.3f}")
         if meta.get('characters'):
             print(f"    Characters: {meta['characters']}")
         if meta.get('topics'):
@@ -142,10 +143,10 @@ def search(
 def interactive_mode():
     """Interactive search REPL."""
     print("Fairy Project Search")
-    print("Commands: :quit, :type <type>, :char <character>, :topic <topic>, :clear")
+    print("Commands: :quit, :folder <name>, :char <character>, :topic <topic>, :clear")
     print()
 
-    filters = {"source_type": None, "character": None, "topic": None}
+    filters = {"folder": None, "character": None, "topic": None}
 
     while True:
         try:
@@ -159,9 +160,9 @@ def interactive_mode():
 
         if query == ":quit":
             break
-        elif query.startswith(":type "):
-            filters["source_type"] = query[6:].strip() or None
-            print(f"Filter set: source_type={filters['source_type']}")
+        elif query.startswith(":folder "):
+            filters["folder"] = query[8:].strip() or None
+            print(f"Filter set: folder={filters['folder']}")
             continue
         elif query.startswith(":char "):
             filters["character"] = query[6:].strip() or None
@@ -172,7 +173,7 @@ def interactive_mode():
             print(f"Filter set: topic={filters['topic']}")
             continue
         elif query == ":clear":
-            filters = {"source_type": None, "character": None, "topic": None}
+            filters = {"folder": None, "character": None, "topic": None}
             print("Filters cleared.")
             continue
 
@@ -185,7 +186,7 @@ def main():
     parser.add_argument("--root", metavar="DIR", help="Root directory with vector_db (default: fairy_project)")
     parser.add_argument("--collection", metavar="NAME", help="Collection name (default: directory name)")
     parser.add_argument("-n", "--num", type=int, default=5, help="Number of results")
-    parser.add_argument("-t", "--type", dest="source_type", help="Filter by source type")
+    parser.add_argument("-t", "--folder", dest="folder", help="Filter by folder (e.g., stories, worldbuilding, non-canon)")
     parser.add_argument("-c", "--char", dest="character", help="Filter by character")
     parser.add_argument("--topic", help="Filter by topic")
     parser.add_argument("-i", "--interactive", action="store_true", help="Interactive mode")
@@ -201,7 +202,7 @@ def main():
         search(
             args.query,
             n_results=args.num,
-            source_type=args.source_type,
+            folder=args.folder,
             character=args.character,
             topic=args.topic,
         )

@@ -74,25 +74,18 @@ def extract_topics(text: str) -> list[str]:
     return found
 
 
-def get_source_type(filepath: Path, root: Path) -> str:
-    """Determine source type from file path."""
+def get_folders(filepath: Path, root: Path) -> list[str]:
+    """Get all folder names from file path as a list."""
     try:
         rel = filepath.relative_to(root)
         parts = rel.parts
     except ValueError:
         parts = filepath.parts
 
-    if "worldbuilding" in parts:
-        return "worldbuilding"
-    elif "stories" in parts:
-        return "story"
-    elif "non-canon" in parts:
-        return "non-canon"
-    elif "documents" in parts:
-        return "document"
-    elif "notes" in parts:
-        return "note"
-    return "other"
+    # All folders (everything except the filename)
+    if len(parts) > 1:
+        return list(parts[:-1])
+    return []
 
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> Generator[tuple[str, int], None, None]:
@@ -233,7 +226,7 @@ def index_files(
         except ValueError:
             rel_path = str(filepath)
 
-        source_type = get_source_type(filepath, root)
+        folders = get_folders(filepath, root)
         chunk_ids = []
 
         for chunk, chunk_idx in chunk_text(content):
@@ -247,7 +240,7 @@ def index_files(
                 "text": chunk,
                 "metadata": {
                     "filename": rel_path,
-                    "source_type": source_type,
+                    "folders": ",".join(folders) if folders else "",
                     "characters": ",".join(characters) if characters else "",
                     "topics": ",".join(topics) if topics else "",
                     "chunk_idx": chunk_idx,
