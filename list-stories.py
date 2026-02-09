@@ -16,14 +16,19 @@ from pathlib import Path
 import yaml
 import re
 
-# Era ordering for sorting
+# Era ordering for sorting (aligned with Fairy_Child_Psychology.md stages)
 ERA_ORDER = {
-    'early-transition': 0,
-    'toddler': 1,
-    'young-child': 2,
-    'pre-academy': 3,
-    'academy': 4,
-    'young-adult': 5,
+    # Stage 0: Old Soul Phase (0-1 years)
+    'old-soul': 0,
+    'early-transition': 1,
+    # Stage 1: Flight Phase (1-15 years)
+    'toddler': 2,
+    'young-child': 3,
+    'pre-academy': 4,
+    # Stage 2: Valley of Hope (15-25 years)
+    'academy': 5,
+    # Stage 3: Truth and Glamour Phase (25-30 years)
+    'young-adult': 6,
     'unknown': 99,
 }
 
