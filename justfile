@@ -68,6 +68,25 @@ index-status:
 index-claude:
     ./index.py --root {{claude_dump}} --rebuild
 
+# === Artifacts ===
+
+# List artifacts in a Claude conversation
+artifacts file:
+    ./extract-artifacts.py "{{file}}"
+
+# Show full artifact content (optionally filtered)
+artifacts-full file +search='':
+    ./extract-artifacts.py "{{file}}" --full {{search}}
+
+# Search artifacts across all Claude conversations
+artifacts-search +terms:
+    ./extract-artifacts.py {{claude_dump}} -s {{terms}}
+
+# List stories awaiting review
+review:
+    @echo "=== Stories for Review ==="
+    @ls -1 {{root}}/snippets/stories-for-review/ 2>/dev/null || echo "(none)"
+
 # === Consistency Checks ===
 
 # Run all checks
