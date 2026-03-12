@@ -3,6 +3,7 @@
 
 # Default content root
 root := "../fairy_project"
+claude_dump := "../claude_2026-03-11_dump"
 
 # === On Update workflow ===
 
@@ -17,13 +18,25 @@ update: index
 
 # === Search & Browse ===
 
-# Semantic search
+# Semantic search (fairy project)
 search query:
     ./search.py "{{query}}"
+
+# Search Claude conversation dump
+search-claude query:
+    ./search.py --root {{claude_dump}} "{{query}}"
 
 # Interactive search REPL
 search-i:
     ./search.py -i
+
+# Catalog fairy-related Claude conversations
+catalog:
+    ./catalog-claude.py --fairy
+
+# Catalog with artifact details
+catalog-detail:
+    ./catalog-claude.py --fairy --show-artifacts --why
 
 # List stories by timeline
 timeline:
@@ -51,6 +64,10 @@ index-inc:
 index-status:
     ./index.py --status
 
+# Rebuild Claude dump index
+index-claude:
+    ./index.py --root {{claude_dump}} --rebuild
+
 # === Consistency Checks ===
 
 # Run all checks
@@ -75,8 +92,11 @@ status:
     @echo "=== Git Status ==="
     @cd {{root}} && git status --short
     @echo ""
-    @echo "=== Index ==="
-    @./index.py --status 2>/dev/null || echo "(run 'just index' to build)"
+    @echo "=== Fairy Project Index ==="
+    @./index.py --status 2>/dev/null | head -3 || echo "(run 'just index' to build)"
+    @echo ""
+    @echo "=== Claude Dump Index ==="
+    @./index.py --root {{claude_dump}} --status 2>/dev/null | head -3 || echo "(run 'just index-claude' to build)"
     @echo ""
     @echo "=== Stories without frontmatter ==="
     @./list-stories.py --missing 2>/dev/null | tail -3

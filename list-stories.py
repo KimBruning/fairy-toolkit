@@ -153,9 +153,13 @@ def main():
             name = s['name'][:38]
             print(f"{name:<40} {era:<18} {str(age):<8} {chars}")
 
-        print(f"\nTotal: {len(stories)} stories")
+        total = len(stories)
         with_fm = sum(1 for s in stories if s['has_frontmatter'])
-        print(f"With frontmatter: {with_fm}, Without: {len(stories) - with_fm}")
+        if args.missing:
+            print(f"\n{total} stories without frontmatter")
+        else:
+            print(f"\nTotal: {total} stories")
+            print(f"With frontmatter: {with_fm}, Without: {total - with_fm}")
 
 
 if __name__ == '__main__':

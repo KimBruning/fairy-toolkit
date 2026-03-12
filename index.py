@@ -116,10 +116,38 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> Generat
         start = end - overlap
 
 
+def extract_conversation_text(data: dict) -> str:
+    """Extract readable text from an Anthropic conversation JSON."""
+    parts = []
+    name = data.get('name', '')
+    if name:
+        parts.append(f"# {name}\n")
+
+    for msg in data.get('chat_messages', []):
+        sender = msg.get('sender', '?')
+        text = msg.get('text', '')
+
+        # Extract artifact content from content blocks
+        artifacts = []
+        for block in (msg.get('content') or []):
+            if block.get('type') == 'tool_use' and block.get('name') == 'artifacts':
+                inp = block.get('input', {})
+                title = inp.get('title', '')
+                content = inp.get('content', '')
+                if content:
+                    artifacts.append(f"[Artifact: {title}]\n{content}")
+
+        if text or artifacts:
+            parts.append(f"## {sender}\n{text}")
+            parts.extend(artifacts)
+
+    return '\n\n'.join(parts)
+
+
 def collect_documents(root: Path, extensions: set = None) -> Generator[tuple[Path, str], None, None]:
     """Collect all indexable documents."""
     if extensions is None:
-        extensions = {'.md', '.txt'}
+        extensions = {'.md', '.txt', '.json'}
     skip_dirs = {'py', 'vector_db', '__pycache__', '.git', 'node_modules'}
 
     for filepath in root.rglob('*'):
@@ -127,6 +155,20 @@ def collect_documents(root: Path, extensions: set = None) -> Generator[tuple[Pat
             if not any(skip in filepath.parts for skip in skip_dirs):
                 try:
                     content = filepath.read_text(encoding='utf-8')
+                    if not content.strip():
+                        continue
+
+                    # Handle Anthropic conversation JSON
+                    if filepath.suffix == '.json':
+                        try:
+                            data = json.load(open(filepath, encoding='utf-8'))
+                            if isinstance(data, dict) and 'chat_messages' in data:
+                                content = extract_conversation_text(data)
+                            else:
+                                continue  # Not a conversation file
+                        except (json.JSONDecodeError, KeyError):
+                            continue
+
                     if content.strip():
                         yield filepath, content
                 except Exception as e:

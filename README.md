@@ -44,6 +44,51 @@ cd ..   # Go to parent containing both toolkit and project
 ./fairy-toolkit/search.py -i   # Interactive mode
 ```
 
+## Task Runner
+
+[`just`](https://github.com/casey/just) is the recommended way to run common tasks. Run from the `fairy-toolkit/` directory:
+
+```bash
+cd fairy-toolkit/
+
+# Project status overview
+just status
+
+# Rebuild index after adding/editing content
+just update
+
+# Semantic search (fairy project)
+just search "fairy flight modes"
+
+# Search Claude conversation dump
+just search-claude "acculturation nurse Aisling"
+
+# Interactive search REPL
+just search-i
+
+# Catalog fairy-related Claude conversations
+just catalog
+just catalog-detail   # with artifact info and match reasons
+
+# List stories by timeline or era
+just timeline
+just era academy
+
+# Find stories missing frontmatter
+just missing
+
+# Run consistency checks (frontmatter + stale refs)
+just check
+
+# Index management
+just index           # Full rebuild (fairy project)
+just index-inc       # Incremental (changed files only)
+just index-claude    # Rebuild Claude dump index
+just index-status    # Show index info
+```
+
+Run `just --list` to see all available recipes.
+
 ## Using with Claude Code
 
 **Run Claude Code from the parent directory:**
@@ -73,14 +118,14 @@ Content is auto-tagged by directory (`stories/` → type:story, etc.)
 ## Dependencies
 
 **NixOS / Nix:** Dependencies are handled automatically via nix-shell shebangs in each script. Just run the scripts directly - nix will fetch:
-- chromadb
+- lancedb
 - sentence-transformers
 - pyyaml
+- pyarrow
 
-**Other systems:** Install manually:
-```bash
-pip install chromadb sentence-transformers pyyaml
-```
+**Other systems:** You'll need lancedb, sentence-transformers, pyyaml, and pyarrow. Install via your package manager of choice.
+
+**Note:** ChromaDB is blacklisted (leaks telemetry). We use LanceDB instead.
 
 ## Configuration
 
